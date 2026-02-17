@@ -1,0 +1,14 @@
+# UI Framework
+nicegui[plotly]==1.4.12
+
+# Database
+clickhouse-connect==0.7.0
+
+# Logic & Data
+pandas==2.2.0
+groq==0.4.2
+python-dotenv==1.0.1
+requests==2.31.0
+
+# Async support
+asyncio
