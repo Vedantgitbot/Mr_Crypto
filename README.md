@@ -64,3 +64,22 @@ Prerequisites
 Docker & Docker Compose
 CoinGecko API Key (Get free key)
 Groq API Key (Get free key)
+
+
+mrcrypto-terminal/
+├── .env.example          
+├── .gitignore           
+├── README.md            
+├── docker-compose.yml   
+├── Dockerfile           
+├── requirements.txt     
+├── API/
+│   └── fetch_api.py     ← 
+├── DB/
+│   ├── Clickhouse_setup.py  ← 
+│   └── run_pipeline.py      ← 
+├── AI/
+│   ├── AI_chatbot.py    ← 
+│   ├── Analytics_engine.py  ← 
+│   ├── GenAi.py         ← 
+│   └── Main_app.py      ← 
