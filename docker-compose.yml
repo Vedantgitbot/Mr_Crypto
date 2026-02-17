@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: mrcrypto-clickhouse
+    ports:
+      - "8123:8123"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 5s
+      timeout: 2s
+      retries: 10
+    networks:
+      - mrcrypto-network
+
+  pipeline:
+    build: .
+    container_name: mrcrypto-pipeline
+    command: python Db/run_pipeline.py
+    restart: always
+    env_file: .env
+    environment:
+      CLICKHOUSE_HOST: clickhouse
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    networks:
+      - mrcrypto-network
+
+  app:
+    build: .
+    container_name: mrcrypto-app
+    ports:
+      - "8080:8080" 
+    restart: always
+    env_file: .env
+    environment:
+      CLICKHOUSE_HOST: clickhouse
+      NICEGUI_RELOAD: "false" 
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      pipeline:
+        condition: service_started
+    networks:
+      - mrcrypto-network
+
+volumes:
+  clickhouse_data:
+
+networks:
+  mrcrypto-network:
+    driver: bridge
