@@ -1,0 +1,28 @@
+# Git
+.git
+.gitignore
+
+# Python leftovers (These are recreated inside the container)
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.venv/
+venv/
+env/
+
+# Environment Secrets (CRITICAL: Don't bake your actual keys into the image!)
+.env
+
+# Docker files (The container doesn't need its own instructions)
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# OS Specific
+.DS_Store
+Thumbs.db
+
+# Documentation & Local logs
+*.md
+*.log

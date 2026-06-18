@@ -1,0 +1,22 @@
+# Environment variables / secrets
+.env
+.env.*
+*.env
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# VS Code
+.vscode/
+
+# Local data
+tmp/
+store/
+user_files/
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
