@@ -1,3 +1,4 @@
+import html as html_lib
 from nicegui import ui
 import pandas as pd
 import plotly.graph_objects as go
@@ -8,6 +9,7 @@ import markdown
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from AI_chatbot import get_clickhouse_client, get_latest_crypto
 from GenAi import get_mrcrypto_response
+from coin_resolver import extract_coin_symbols   # replaces old hardcoded function
 
 # ═══════════════════════════════════════════════════════════════
 # CONFIGURATION
@@ -382,6 +384,12 @@ body, .nicegui-content {{
     box-shadow: 0 4px 12px rgba(255, 107, 53, 0.5);
 }}
 
+.send-button:disabled {{
+    opacity: 0.4;
+    cursor: not-allowed;
+    transform: none;
+}}
+
 @media (max-width: 768px) {{
     .terminal-header {{ padding: 12px 16px; }}
     .logo-text {{ font-size: 16px; }}
@@ -429,7 +437,7 @@ def create_chart(sym):
 
     price_change = df.price.iloc[-1] - df.price.iloc[0]
     line_color = COLORS['chart_up'] if price_change >= 0 else COLORS['chart_down']
-    
+
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=df.timestamp,
@@ -441,7 +449,7 @@ def create_chart(sym):
         hovertemplate='<b>$%{y:,.2f}</b><br>%{x|%b %d, %H:%M}<extra></extra>',
         name=sym
     ))
-    
+
     fig.update_layout(
         autosize=True,
         height=450,
@@ -449,48 +457,13 @@ def create_chart(sym):
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(0,0,0,0)',
         showlegend=False,
-        xaxis=dict(
-            showgrid=True,
-            gridcolor=COLORS['border'],
-            color=COLORS['text_dim'],
-            showline=False,
-            zeroline=False
-        ),
-        yaxis=dict(
-            showgrid=True,
-            gridcolor=COLORS['border'],
-            color=COLORS['text_dim'],
-            showline=False,
-            zeroline=False,
-            tickprefix='$',
-            tickformat=',.0f'
-        ),
+        xaxis=dict(showgrid=True, gridcolor=COLORS['border'], color=COLORS['text_dim'], showline=False, zeroline=False),
+        yaxis=dict(showgrid=True, gridcolor=COLORS['border'], color=COLORS['text_dim'], showline=False, zeroline=False, tickprefix='$', tickformat=',.0f'),
         hovermode='x unified',
         font=dict(family='Inter', size=12, color=COLORS['text_dim'])
     )
-    
-    return fig
 
-def extract_coin_symbols(text):
-    text_upper = text.upper()
-    detected = []
-    
-    for coin in TOP_COINS:
-        if coin in text_upper:
-            detected.append(coin)
-    
-    name_map = {
-        "BITCOIN": "BTC", "ETHEREUM": "ETH", "SOLANA": "SOL",
-        "BINANCE": "BNB", "RIPPLE": "XRP", "CARDANO": "ADA",
-        "AVALANCHE": "AVAX", "DOGECOIN": "DOGE", "CHAINLINK": "LINK",
-        "POLKADOT": "DOT"
-    }
-    
-    for name, symbol in name_map.items():
-        if name in text_upper and symbol not in detected:
-            detected.append(symbol)
-    
-    return detected
+    return fig
 
 # ═══════════════════════════════════════════════════════════════
 # MAIN APPLICATION
@@ -498,12 +471,16 @@ def extract_coin_symbols(text):
 @ui.page('/')
 def main_page():
     ui.add_head_html(get_global_css())
-    
-    state = {"current_coin": "BTC", "coin_data": {}}
-    
+
+    state = {
+        "current_coin": "BTC",
+        "coin_data": {},
+        "is_loading": False,    # double-send guard
+    }
+
     for coin in TOP_COINS:
         state["coin_data"][coin] = fetch_coin(coin) or {}
-    
+
     with ui.row().classes('w-full terminal-header'):
         ui.html('<div class="logo-text">⚡ MRCRYPTO TERMINAL</div>', sanitize=False)
         ui.html('''
@@ -512,163 +489,135 @@ def main_page():
                 <span>Live Market Data</span>
             </div>
         ''', sanitize=False)
-    
+
     with ui.row().classes('w-full').style(f'height: calc(100vh - 60px); background: {COLORS["bg"]};'):
-        
+
+        # ── LEFT: coin list ──────────────────────────────────────
         with ui.column().classes('h-full').style('flex: 0 0 280px; overflow-y: auto;'):
             ui.html('<div class="coin-selector"><div style="font-size: 13px; font-weight: 700; color: #8b949e; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.05em;">Markets</div></div>', sanitize=False)
-            
+
             coin_cards_container = ui.column().style('padding: 0 20px 20px 20px;')
             coin_cards = {}
-            
+
             with coin_cards_container:
                 for coin in TOP_COINS:
-                    data = state["coin_data"].get(coin, {})
-                    price = data.get("price", 0)
+                    data   = state["coin_data"].get(coin, {})
+                    price  = data.get("price", 0)
                     change = data.get("change_24h", 0)
-                    
+
                     card_html = f'''
                     <div class="coin-card {'active' if coin == state["current_coin"] else ''}" id="coin-{coin}">
-                        <div class="coin-symbol">{coin}</div>
+                        <div class="coin-symbol">{html_lib.escape(coin)}</div>
                         <div class="coin-price">${price:,.2f}</div>
                         <div class="coin-change {'positive' if change >= 0 else 'negative'}">{change:+.2f}%</div>
                     </div>
                     '''
                     card_element = ui.html(card_html, sanitize=False)
                     coin_cards[coin] = card_element
-                    
+
                     def make_click_handler(symbol):
                         async def handler():
                             state["current_coin"] = symbol
-                            
                             for c, card in coin_cards.items():
-                                data = state["coin_data"].get(c, {})
-                                price = data.get("price", 0)
-                                change = data.get("change_24h", 0)
+                                d = state["coin_data"].get(c, {})
+                                p = d.get("price", 0)
+                                ch = d.get("change_24h", 0)
                                 card.content = f'''
                                 <div class="coin-card {'active' if c == symbol else ''}" id="coin-{c}">
-                                    <div class="coin-symbol">{c}</div>
-                                    <div class="coin-price">${price:,.2f}</div>
-                                    <div class="coin-change {'positive' if change >= 0 else 'negative'}">{change:+.2f}%</div>
+                                    <div class="coin-symbol">{html_lib.escape(c)}</div>
+                                    <div class="coin-price">${p:,.2f}</div>
+                                    <div class="coin-change {'positive' if ch >= 0 else 'negative'}">{ch:+.2f}%</div>
                                 </div>
                                 '''
-                            
-                            data = state["coin_data"].get(symbol, {})
-                            chart_header.content = f'''
-                            <div class="chart-header">
-                                <div>
-                                    <div class="chart-title">{symbol} / USD</div>
-                                    <div class="chart-subtitle">Last 24 hours</div>
-                                </div>
-                                <div style="text-align: right;">
-                                    <div class="chart-price">${data.get("price", 0):,.2f}</div>
-                                    <div class="chart-change {'positive' if data.get('change_24h', 0) >= 0 else 'negative'}">{data.get('change_24h', 0):+.2f}%</div>
-                                </div>
-                            </div>
-                            '''
+                            d = state["coin_data"].get(symbol, {})
+                            chart_header.content = _chart_header_html(symbol, d)
                             chart_element.update_figure(create_chart(symbol))
                         return handler
-                    
+
                     card_element.on('click', make_click_handler(coin))
-        
+
+        # ── CENTRE: chart ────────────────────────────────────────
         with ui.column().classes('h-full').style('flex: 1; padding: 20px; overflow: hidden;'):
             with ui.column().classes('chart-container'):
                 initial_data = state["coin_data"].get("BTC", {})
-                chart_header = ui.html(f'''
-                <div class="chart-header">
-                    <div>
-                        <div class="chart-title">BTC / USD</div>
-                        <div class="chart-subtitle">Last 24 hours</div>
-                    </div>
-                    <div style="text-align: right;">
-                        <div class="chart-price">${initial_data.get("price", 0):,.2f}</div>
-                        <div class="chart-change {'positive' if initial_data.get('change_24h', 0) >= 0 else 'negative'}">{initial_data.get('change_24h', 0):+.2f}%</div>
-                    </div>
-                </div>
-                ''', sanitize=False)
-                
+                chart_header  = ui.html(_chart_header_html("BTC", initial_data), sanitize=False)
                 chart_element = ui.plotly(create_chart("BTC")).style('flex: 1; width: 100%;')
-        
+
+        # ── RIGHT: chat ──────────────────────────────────────────
         with ui.column().classes('chat-panel').style('flex: 0 0 400px;'):
             ui.html('''
             <div class="chat-header">
-                <div class="chat-title">
-                    <span>🤖</span>
-                    <span>AI Assistant</span>
-                </div>
+                <div class="chat-title"><span>🤖</span><span>AI Assistant</span></div>
                 <div class="chat-subtitle">Powered by advanced market analytics</div>
             </div>
             ''', sanitize=False)
-            
+
             messages_scroll = ui.scroll_area().classes('messages-container')
             with messages_scroll:
                 messages_container = ui.column().classes('w-full')
-                
                 with messages_container:
                     ui.html('''
                     <div class="welcome-container">
                         <div class="welcome-icon">💬</div>
                         <div class="welcome-title">Welcome to MrCrypto</div>
                         <div class="welcome-text">
-                            Ask me about market trends, price analysis, or specific cryptocurrencies. 
+                            Ask me about market trends, price analysis, or specific cryptocurrencies.
                             I'll provide data-driven insights based on real-time analytics.
                         </div>
                     </div>
                     ''', sanitize=False)
-            
+
             with ui.column().classes('chat-input-container'):
                 with ui.row().classes('w-full chat-input-wrapper'):
                     chat_input = ui.input(placeholder='Ask about crypto markets...').props('borderless').style(
                         'flex: 1; font-size: 14px; background: transparent; color: #e6edf3;'
                     )
                     send_btn = ui.button(icon='send').props('flat round dense').classes('send-button')
-            
+
             typing_indicator = None
-            
+
             async def send_message():
                 nonlocal typing_indicator
-                
+
+                # ── Double-send guard ──────────────────────────
+                if state["is_loading"]:
+                    return
+
                 user_text = chat_input.value.strip()
                 if not user_text:
                     return
-                
-                chat_input.value = ""
-                
+
+                state["is_loading"] = True
+                chat_input.value   = ""
+                chat_input.props("disabled")
+                send_btn.props("disabled")
+
+                # ── XSS fix: escape raw user text before HTML ──
+                safe_text = html_lib.escape(user_text)
                 with messages_container:
-                    ui.html(f'<div class="message-user">{user_text}</div>', sanitize=False)
-                
+                    ui.html(f'<div class="message-user">{safe_text}</div>', sanitize=False)
+
+                # ── Chart: switch to first detected coin ────────
                 mentioned = extract_coin_symbols(user_text)
                 if mentioned:
                     symbol = mentioned[0]
                     state["current_coin"] = symbol
-                    
                     for c, card in coin_cards.items():
-                        data = state["coin_data"].get(c, {})
-                        price = data.get("price", 0)
-                        change = data.get("change_24h", 0)
+                        d  = state["coin_data"].get(c, {})
+                        p  = d.get("price", 0)
+                        ch = d.get("change_24h", 0)
                         card.content = f'''
                         <div class="coin-card {'active' if c == symbol else ''}" id="coin-{c}">
-                            <div class="coin-symbol">{c}</div>
-                            <div class="coin-price">${price:,.2f}</div>
-                            <div class="coin-change {'positive' if change >= 0 else 'negative'}">{change:+.2f}%</div>
+                            <div class="coin-symbol">{html_lib.escape(c)}</div>
+                            <div class="coin-price">${p:,.2f}</div>
+                            <div class="coin-change {'positive' if ch >= 0 else 'negative'}">{ch:+.2f}%</div>
                         </div>
                         '''
-                    
-                    data = state["coin_data"].get(symbol, {})
-                    chart_header.content = f'''
-                    <div class="chart-header">
-                        <div>
-                            <div class="chart-title">{symbol} / USD</div>
-                            <div class="chart-subtitle">Last 24 hours</div>
-                        </div>
-                        <div style="text-align: right;">
-                            <div class="chart-price">${data.get("price", 0):,.2f}</div>
-                            <div class="chart-change {'positive' if data.get('change_24h', 0) >= 0 else 'negative'}">{data.get('change_24h', 0):+.2f}%</div>
-                        </div>
-                    </div>
-                    '''
+                    d = state["coin_data"].get(symbol, {})
+                    chart_header.content = _chart_header_html(symbol, d)
                     chart_element.update_figure(create_chart(symbol))
-                
+
+                # ── Typing indicator ────────────────────────────
                 with messages_container:
                     typing_indicator = ui.html('''
                     <div class="typing-indicator">
@@ -677,27 +626,55 @@ def main_page():
                         <div class="typing-dot"></div>
                     </div>
                     ''', sanitize=False)
-                
+
                 messages_scroll.scroll_to(percent=1.0)
-                
+
+                # ── LLM call (non-blocking) ─────────────────────
                 loop = asyncio.get_event_loop()
                 try:
                     response = await loop.run_in_executor(None, get_mrcrypto_response, user_text)
                 except Exception as e:
                     response = f"⚠️ Error: Unable to process request. {str(e)}"
-                
+
                 if typing_indicator:
                     typing_indicator.delete()
                     typing_indicator = None
-                
+
                 with messages_container:
                     html_response = markdown.markdown(response)
                     ui.html(f'<div class="message-assistant">{html_response}</div>', sanitize=False)
-                
+
                 messages_scroll.scroll_to(percent=1.0)
-            
+
+                # ── Re-enable input ─────────────────────────────
+                state["is_loading"] = False
+                chat_input.props(remove="disabled")
+                send_btn.props(remove="disabled")
+
             send_btn.on('click', send_message)
             chat_input.on('keydown.enter', send_message)
+
+
+# ═══════════════════════════════════════════════════════════════
+# HELPERS
+# ═══════════════════════════════════════════════════════════════
+def _chart_header_html(symbol: str, data: dict) -> str:
+    price  = data.get("price", 0)
+    change = data.get("change_24h", 0)
+    cls    = "positive" if change >= 0 else "negative"
+    return f'''
+    <div class="chart-header">
+        <div>
+            <div class="chart-title">{html_lib.escape(symbol)} / USD</div>
+            <div class="chart-subtitle">Last 24 hours</div>
+        </div>
+        <div style="text-align: right;">
+            <div class="chart-price">${price:,.2f}</div>
+            <div class="chart-change {cls}">{change:+.2f}%</div>
+        </div>
+    </div>
+    '''
+
 
 if __name__ in {"__main__", "__mp_main__"}:
     ui.run(
