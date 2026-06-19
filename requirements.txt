@@ -11,4 +11,12 @@ python-dotenv==1.0.1
 requests==2.31.0
 
 # Async support
-asyncio
+asyncio==3.4.3
+
+# LangChain
+langchain-groq
+langchain-core
+
+# Fuzzy Matching
+fuzzywuzzy
+python-Levenshtein
